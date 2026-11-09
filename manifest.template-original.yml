@@ -1,0 +1,24 @@
+# Pristine manifest of the official confluence-content-action-ui-kit
+# template this project was scaffolded from (kept for diffing).
+# RuleBridge additionally uses modules from the official
+# confluence-space-page-ui-kit template (confluence:spacePage).
+
+modules:
+  confluence:contentAction:
+    - key: hello-world-content-action
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: Hello World!
+  function:
+    - key: resolver
+      handler: index.handler
+resources:
+  - key: main
+    path: src/frontend/index.jsx
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64

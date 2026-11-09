@@ -1,0 +1,207 @@
+# RuleBridge — Forge app manifest.
+#
+# NOTE: there is deliberately NO `app.id` yet. Running `forge register`
+# after Bayu's `forge login` stamps the real app id here; a
+# hand-invented id would be rejected at deploy time. Until then,
+# `forge lint` reports exactly one error: "app must have required
+# property 'id'" — that is expected and is the registration step.
+#
+# Module and scope names verified against Atlassian's Forge manifest
+# reference and the Confluence granular-scopes page on 2026-11-09
+# (confluence:contentBylineItem, confluence:contentAction,
+# confluence:spacePage; granular scopes read:page:confluence etc.).
+modules:
+  # Per-page surface, always visible: an entry in the content byline
+  # under the page title. Renders the consistency verdict for the page
+  # being viewed. Backend: resolver (analyzePage / applyFix).
+  confluence:contentBylineItem:
+    - key: rulebridge-byline-item
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: RuleBridge — does this page contradict itself?
+      icon: https://developer.atlassian.com/platform/forge/images/icons/issue-panel-icon.svg
+  # The same verdict + fixes from the page's "•••" (more actions)
+  # menu, rendered as a modal — the deliberate, full-screen way to run
+  # a check and apply a fix while editing.
+  confluence:contentAction:
+    - key: rulebridge-content-action
+      resource: main
+      resolver:
+        function: resolver
+      render: native
+      title: RuleBridge — check this page
+  # Space-level surface: a page in the space navigation listing every
+  # page whose body contradicts its declared state, plus linked
+  # decision pages that contradict each other.
+  # Backend: resolver (scanSpace).
+  confluence:spacePage:
+    - key: rulebridge-space-page
+      resource: spacePage
+      resolver:
+        function: resolver
+      render: native
+      title: RuleBridge — space contradiction scan
+      route: rulebridge
+  # BONUS VARIANT — Best Agents (Rovo): the same brain, exposed to
+  # Rovo. The agent answers "does this decision page contradict
+  # itself?" for one page or a whole space, and can apply the engine's
+  # offered fix. (The primary entry stays Apps for Business Teams;
+  # this agent is the stackable bonus angle — see DEVPOST.md.)
+  rovo:agent:
+    - key: rulebridge-agent
+      name: RuleBridge
+      description: >-
+        Detects contradictions inside Confluence decision records and
+        meeting notes — pages that declare themselves decided, final or
+        approved while their bodies still hold open questions, unowned
+        or undated actions, placeholders, or a linked decision that
+        says the opposite — and applies one-click, human-confirmed,
+        additive fixes.
+      prompt: >
+        You are RuleBridge, a meticulous Confluence consistency
+        checker. A decision page has two voices: the state it declares
+        in its title and labels, and what its body actually contains.
+        When they disagree, teams act on a decision that was never
+        really closed. Your job is to find that gap and, when asked,
+        help repair it.
+
+        You can perform the following jobs:
+
+        ---
+        Job 1: Check one page
+        1. Obtain the page id from the user's message or from your
+           context (when the user is viewing a page, prefer that one).
+        2. Invoke the check-page-contradictions action with that id.
+        3. Report the verdict plainly: name the declared state, and if
+           there are findings, explain each in one sentence and name
+           the fix the checker offers.
+
+        ---
+        Job 2: Scan a space
+        1. Obtain the space key from the user.
+        2. Invoke the scan-space-contradictions action.
+        3. Summarise how many pages were scanned, how many contradict
+           themselves, and any linked pairs in conflict; list each with
+           its reason.
+
+        ---
+        Job 3: Fix a contradiction on one page
+        1. First run Job 1 on the page so the offered fix is current.
+        2. Tell the user exactly which fix you are about to apply and
+           wait for their confirmation whenever the conversation
+           allows it; never apply a fix the user did not ask for.
+           Remember: RuleBridge fixes are additive only — a decision
+           log block, an unresolved-items summary block, or a
+           "needs-review" label. The app never rewrites a page's own
+           words.
+        3. Invoke fix-page-contradiction with the page id and the fix
+           kind the checker offered ('insert-decision-log',
+           'flag-page', or 'draft-summary').
+        4. Report the action's result verbatim in substance: what
+           changed, or why the fix could not be applied.
+
+        Rules: never invent a page's declared state, findings or
+        verdict — only report what the actions return. If an action
+        returns an error, relay it and stop; do not guess a workaround
+        that writes data.
+      conversationStarters:
+        - Check whether this decision page contradicts itself
+        - Scan a space for contradicting decision records
+        - Fix the contradiction on a page
+      actions:
+        - check-page-contradictions
+        - fix-page-contradiction
+        - scan-space-contradictions
+  # The agent's tools. These are standard Forge `action` modules, so
+  # other agents (including customer-built ones) can invoke them too.
+  action:
+    - key: check-page-contradictions
+      name: Check page contradictions
+      function: checkPageContradictionsAction
+      actionVerb: GET
+      description: >-
+        Checks whether a Confluence page's body contradicts the state
+        the page declares (decided / final / approved): open questions,
+        open action items, owners without due dates, placeholders in a
+        final page, draft labels on a final page. Returns the verdict
+        and the fix on offer for each finding. Read-only.
+      inputs:
+        pageId:
+          title: Confluence Page ID
+          type: string
+          required: true
+          description: The numeric id of the Confluence page to check, e.g. "123456".
+    - key: fix-page-contradiction
+      name: Fix page contradiction
+      function: fixPageContradictionAction
+      actionVerb: UPDATE
+      description: >-
+        Applies one fix that the contradiction check currently offers
+        for a page: insert a decision-log table at the page top, add a
+        "needs-review" label, or draft an unresolved-items summary at
+        the page top. All fixes are additive; the page's own body text
+        is never rewritten. Fails safely when the requested fix is not
+        currently offered.
+      inputs:
+        pageId:
+          title: Confluence Page ID
+          type: string
+          required: true
+          description: The numeric id of the Confluence page to fix, e.g. "123456".
+        fixKind:
+          title: Fix kind
+          type: string
+          required: true
+          description: >-
+            One of "insert-decision-log", "flag-page", or
+            "draft-summary" — the kind of fix the contradiction check
+            offered for this page.
+    - key: scan-space-contradictions
+      name: Scan space for contradictions
+      function: scanSpaceContradictionsAction
+      actionVerb: GET
+      description: >-
+        Scans a Confluence space's pages and returns every page whose
+        body contradicts its declared state, plus linked decision
+        pages that contradict each other on the same topic. Read-only.
+      inputs:
+        spaceKey:
+          title: Confluence Space Key
+          type: string
+          required: true
+          description: The key of the Confluence space to scan, e.g. "TEAM".
+  function:
+    - key: resolver
+      handler: index.handler
+    - key: checkPageContradictionsAction
+      handler: rovo.checkPageContradictions
+    - key: fixPageContradictionAction
+      handler: rovo.fixPageContradiction
+    - key: scanSpaceContradictionsAction
+      handler: rovo.scanSpaceContradictions
+resources:
+  - key: main
+    path: src/frontend/index.jsx
+  - key: spacePage
+    path: src/frontend/space.jsx
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64
+permissions:
+  scopes:
+    # Page reads (byline item, space scan, actions) and page writes
+    # (the additive fix blocks) — granular Confluence scopes.
+    - read:page:confluence
+    - write:page:confluence
+    # Content properties: the page-level due-date the owner rule
+    # honours, and explicit linked-page records for Rule 6 pairing.
+    - read:content.property:confluence
+    - write:content.property:confluence
+    # The flag-page fix is a label add — nothing else about labels.
+    - write:label:confluence
+    # CQL search powers the space scan's page discovery.
+    - search:confluence
