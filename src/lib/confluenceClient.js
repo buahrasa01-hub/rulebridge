@@ -58,13 +58,26 @@ async function request(method, path, body) {
     return unwrap(fake, path);
   }
   // Live transport — lazy import so plain-Node tests never load Forge.
-  const { default: api, route } = await import('@forge/api');
+  const apiModule = await import('@forge/api');
+  // Interop guard (same bundler-wrapping concern as the resolver):
+  // use whichever module level actually exposes asUser().
+  const api = [apiModule, apiModule.default, apiModule.default?.default]
+    .find((candidate) => candidate && typeof candidate.asUser === 'function');
   const options = { method, headers: { Accept: 'application/json' } };
   if (body !== undefined) {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(body);
   }
-  const response = await api.asUser().requestConfluence(route`${path}`, options);
+  // The path is built entirely by this client (dynamic segments are
+  // already encodeURIComponent'd), so it must go through
+  // assumeTrustedRoute(): feeding a whole built path into the route``
+  // tag as a single interpolated value is rejected by @forge/api with
+  // "Disallowing path manipulation attempt" — that rejection is what
+  // silently forced the panel's demo-fixture fallback on live sites.
+  const trustedRoute = typeof apiModule.assumeTrustedRoute === 'function'
+    ? apiModule.assumeTrustedRoute(path)
+    : apiModule.route([path]);
+  const response = await api.asUser().requestConfluence(trustedRoute, options);
   let json = null;
   try {
     json = await response.json();
@@ -251,10 +264,29 @@ const PAGE_EXPAND = 'body.storage,metadata.labels,space,version';
 
 /** Fetches one page by id, normalised for the rules engine. */
 export async function getPage(pageId) {
-  const raw = await request(
-    'GET',
-    `/rest/api/content/${encodeURIComponent(pageId)}?expand=${PAGE_EXPAND}`,
-  );
+  let raw;
+  try {
+    raw = await request(
+      'GET',
+      `/rest/api/content/${encodeURIComponent(pageId)}?expand=${PAGE_EXPAND}`,
+    );
+  } catch (primaryError) {
+    // Some installs reject the direct content GET ("Authentication
+    // Required") even though CQL search by the same user succeeds.
+    // Fall back to a search by id — it returns the same expanded
+    // shape, so callers keep reading the live page.
+    const found = await searchPages(null, {
+      cql: `id = ${pageId}`,
+      maxTotal: 1,
+    }).catch(() => []);
+    if (!found.length) {
+      throw primaryError;
+    }
+    const dueDate = await getPageProperty(pageId, 'rulebridge-duedate').catch(
+      () => null,
+    );
+    return { ...found[0], dueDate };
+  }
   const dueDate = await getPageProperty(pageId, 'rulebridge-duedate');
   return normalisePage(raw, { dueDate });
 }

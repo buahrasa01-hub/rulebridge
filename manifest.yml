@@ -54,10 +54,9 @@ modules:
       name: RuleBridge
       description: >-
         Detects contradictions inside Confluence decision records and
-        meeting notes — pages that declare themselves decided, final or
-        approved while their bodies still hold open questions, unowned
-        or undated actions, placeholders, or a linked decision that
-        says the opposite — and applies one-click, human-confirmed,
+        meeting notes — pages declaring themselves decided, final or
+        approved while their bodies still hold open questions or
+        unowned actions — and applies one-click, human-confirmed,
         additive fixes.
       prompt: >
         You are RuleBridge, a meticulous Confluence consistency
@@ -119,14 +118,13 @@ modules:
   action:
     - key: check-page-contradictions
       name: Check page contradictions
-      function: checkPageContradictionsAction
+      function: checkPageAction
       actionVerb: GET
       description: >-
-        Checks whether a Confluence page's body contradicts the state
-        the page declares (decided / final / approved): open questions,
-        open action items, owners without due dates, placeholders in a
-        final page, draft labels on a final page. Returns the verdict
-        and the fix on offer for each finding. Read-only.
+        Checks whether a Confluence page's body contradicts its declared
+        state (decided / final / approved): open questions or action
+        items, owners without due dates, placeholders or draft labels.
+        Returns the verdict and fixes on offer. Read-only.
       inputs:
         pageId:
           title: Confluence Page ID
@@ -135,15 +133,13 @@ modules:
           description: The numeric id of the Confluence page to check, e.g. "123456".
     - key: fix-page-contradiction
       name: Fix page contradiction
-      function: fixPageContradictionAction
+      function: fixPageAction
       actionVerb: UPDATE
       description: >-
-        Applies one fix that the contradiction check currently offers
-        for a page: insert a decision-log table at the page top, add a
-        "needs-review" label, or draft an unresolved-items summary at
-        the page top. All fixes are additive; the page's own body text
-        is never rewritten. Fails safely when the requested fix is not
-        currently offered.
+        Applies one fix the contradiction check offers for a page:
+        insert a decision-log table at the top, add a "needs-review"
+        label, or draft an unresolved-items summary. All fixes are
+        additive; body text is never rewritten.
       inputs:
         pageId:
           title: Confluence Page ID
@@ -160,7 +156,7 @@ modules:
             offered for this page.
     - key: scan-space-contradictions
       name: Scan space for contradictions
-      function: scanSpaceContradictionsAction
+      function: scanSpaceAction
       actionVerb: GET
       description: >-
         Scans a Confluence space's pages and returns every page whose
@@ -175,11 +171,11 @@ modules:
   function:
     - key: resolver
       handler: index.handler
-    - key: checkPageContradictionsAction
+    - key: checkPageAction
       handler: rovo.checkPageContradictions
-    - key: fixPageContradictionAction
+    - key: fixPageAction
       handler: rovo.fixPageContradiction
-    - key: scanSpaceContradictionsAction
+    - key: scanSpaceAction
       handler: rovo.scanSpaceContradictions
 resources:
   - key: main
@@ -187,6 +183,7 @@ resources:
   - key: spacePage
     path: src/frontend/space.jsx
 app:
+  id: ari:cloud:ecosystem::app/dafea264-67c8-4ef7-a07c-5428eb10f111
   runtime:
     name: nodejs24.x
     memoryMB: 256

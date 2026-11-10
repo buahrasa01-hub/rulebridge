@@ -92,3 +92,14 @@ listing submission → Devpost filing before 2026-12-23 03:00 WIB.
 Human sanity-check items recorded in README "Design decisions":
 declared-state signal table, additive-only fix philosophy, Rule 6
 conservatism, explicit pairing model.
+
+## Fix 2026-11-10 — Forge bundler interop (resolver constructor)
+
+Production deploy failed at function load: "out_namespaceObject is not a constructor". Root cause: src/resolvers/index.js used `import Resolver from "@forge/resolver"` + `new Resolver()`; @forge/resolver is CJS with the class on exports.default, and the Forge (esbuild) bundler binds the default import to the module namespace object, not the class. Reproduced locally with esbuild (old pattern throws "import_resolver.default is not a constructor"; tests never imported the resolver module, so the suite stayed green). Fix: namespace import + pick the first function level among module / .default / .default.default (ResolverClass); same defensive extraction for the lazy @forge/api import in the product client. Verified: esbuild bundles of src/index.js and src/rovo.js for both apps load cleanly and export working handlers; unit suites still pass.
+
+## Fix 2026-11-10 (2) — route path manipulation rejection
+
+Dev panel loaded after the ResolverClass fix but fell back to the demo fixture: forge logs showed "analyzeIssue: live read failed for DEMO-5: Disallowing path manipulation attempt". Cause: the product clients interpolated the ENTIRE built path (slashes + query string) as one value into the route`` tag, which @forge/api rejects by design. Reproduced locally against the real @forge/api. Fix: build the request route with assumeTrustedRoute(path) (fallback route([path])) — paths are built only inside the clients with encodeURIComponent on dynamic segments. Verified: live getIssue now passes route construction and only stops at the plain-Node fetch bridge; suites still pass.
+
+## 2026-11-10 (evening) — Bug 3: byline live-read "Authentication Required"
+Production logs (Bayu, forge logs) showed: `analyzePage: live read failed for 753680: Authentication Required` — the page id arrived correctly and the resolver ran, but the direct content GET (`/rest/api/content/{id}`) was rejected in the installed environment, while CQL search by the same user worked (the space scan read live pages). Fix: `getPage` now falls back to a CQL search by id (same expanded shape) when the direct GET throws, rethrowing the original error when search finds nothing. No manifest/scope changes. Tests 44/44; esbuild bundle smoke OK for index + rovo entries.
