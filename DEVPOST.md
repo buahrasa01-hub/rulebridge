@@ -103,6 +103,9 @@ declaration and its body:
 | Space page | `confluence:spacePage` (UI Kit) | Whole-space contradiction tables (DynamicTable) |
 | Agent | `rovo:agent` | RuleBridge agent with three jobs: check, scan, fix |
 | Agent tools | `action` × 3 | check-page-contradictions (GET), fix-page-contradiction (UPDATE), scan-space-contradictions (GET) |
+| MCP server | `rovo:mcp` | The same three actions as MCP tools (RuleBridge MCP) |
+| Skill | `rovo:skill` | Open-source skill `rulebridge-contradiction-checker` (SKILL.md) |
+| Graph evidence | Teamwork Graph API | Pages linked from the checked page (read-only) |
 | Backend | `function` (resolvers + action handlers) | Shared engine, fix executor, REST client |
 
 All product calls go through one client
@@ -114,7 +117,10 @@ to text deterministically in the client (task lists keep their
 checkbox state — that state is evidence the rules read). The engine
 (`src/lib/decisionRules.js`) is a pure module with a 44-case test
 suite (rules, REST client over a fake transport, fix executor) that
-runs with `npm test` — no site needed.
+runs with `npm test` — no site needed. The MCP tools add 8 tests
+(`test/mcpTools.test.js`) and the graph integration 11 more
+(`test/teamworkGraph.test.js`) — 63 tests in total, all
+mock-transport, all passing.
 
 ### Why this matters
 
@@ -161,6 +167,38 @@ the offered fix from the page's *current* state at invocation time,
 so an agent can never apply a repair the deterministic checker has
 not just approved — and every repair it can apply is additive.
 Agents propose; the engine disposes.
+
+### Best app with MCP
+
+The same three actions are exposed as MCP tools on a Rovo MCP server
+(one `rovo:mcp` module, `rulebridge-mcp`): `check-page-contradictions`
+(GET), `fix-page-contradiction` (UPDATE), `scan-space-contradictions`
+(GET). The handlers in `src/rovo.js` are unchanged — the MCP server is
+a new doorway to the same tools, not a second implementation. A
+matching open-source skill ships with them: one `rovo:skill` module
+(`rulebridge-contradiction-checker`, `skills/rulebridge-contradiction-
+checker/SKILL.md`) declaring the three tools as dependencies,
+registered in the `rovo:agent`, so any Rovo agent runs a contradiction
+check the same careful way: check first, report the verdict, fix only
+what the checker offered and only after the user confirms. The MCP
+endpoint is
+`https://mcp.atlassian.com/forge/dafea264-67c8-4ef7-a07c-5428eb10f111`
+(external exposure is off by default and is activated by a site admin).
+8 new tests cover the MCP tools (`test/mcpTools.test.js`).
+
+### Best apps with Teamwork Graph
+
+The linked-decision check (Rule 6) now runs on real links from the
+Teamwork Graph (`src/lib/teamworkGraph.js`, one read-only curated
+GraphQL query, `confluencePageLinkedConfluencePages`, no write access
+exists to the graph): instead of only same-space pairs or manually
+maintained `rulebridge-links` properties, the checker reads the pages
+actually linked from the page being checked and catches a linked
+decision that states the opposite position. The graph never overrules
+the engine and never blocks a verdict — if the graph is unavailable,
+the verdict falls back to the engine alone and says so. One minimal
+read-only scope (`read:graph:page:confluence`). 11 new tests cover the
+integration (`test/teamworkGraph.test.js`).
 
 ## Testing / configuration instructions for judges
 
@@ -214,5 +252,11 @@ Confluence Cloud REST API · Node.js 24
 ## Links
 
 - Installation link: https://developer.atlassian.com/console/install/dafea264-67c8-4ef7-a07c-5428eb10f111?signature=AYABePG83oJC9A4sQFkE6wX%2B5hUAAAADAAdhd3Mta21zAEthcm46YXdzOmttczp1cy13ZXN0LTI6NzA5NTg3ODM1MjQzOmtleS83MDVlZDY3MC1mNTdjLTQxYjUtOWY5Yi1lM2YyZGNjMTQ2ZTcAuAECAQB4CxqLTo9l4lqXuFjNim1xJM%2Bp%2F3TVP9xHS2BrU5DRRucBCfvTqsRHMoYRRZe1OU7owAAAAH4wfAYJKoZIhvcNAQcGoG8wbQIBADBoBgkqhkiG9w0BBwEwHgYJYIZIAWUDBAEuMBEEDALA%2F3ZQPxoiC5fFmAIBEIA7oBP1u69DT4nhbSfwcDSlXR%2F8onlpVe%2F%2FazxwBbadzFalV%2FGjDzNLD4ZamUkQdIG01C%2F3H7VfXDua1MIAB2F3cy1rbXMAS2Fybjphd3M6a21zOmV1LXdlc3QtMTo3MDk1ODc4MzUyNDM6a2V5LzQ2MzBjZTZiLTAwYzMtNGRlMi04NzdiLTYyN2UyMDYwZTVjYwC4AQICAHi9bVMAkme4qVQX1fQHo6ePw3H40A7cGfz7yrmSfBWMXgFeeRSr6FAKra46oYMpD%2FI%2BAAAAfjB8BgkqhkiG9w0BBwagbzBtAgEAMGgGCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMEKotGV4dfuOk7Os7AgEQgDvbuQ08vw00TFCAoWsOkI1Fz24S3zSZvgx7f5QfrLbEl6X4n0q9Qp43Oec3pEEwgTBVap7dInqvqeHExAAHYXdzLWttcwBLYXJuOmF3czprbXM6dXMtZWFzdC0xOjcwOTU4NzgzNTI0MzprZXkvNmMxMjBiYTAtNGNkNS00OTg1LWI4MmUtNDBhMDQ5NTJjYzU3ALgBAgIAeDYASx0XCjkny4iLV6vz%2BKtEGSGT6kdt0QRpkn6D%2FlVEAZ3W8zoz6cE%2FMO%2FqHQJ5u%2B4AAAB%2BMHwGCSqGSIb3DQEHBqBvMG0CAQAwaAYJKoZIhvcNAQcBMB4GCWCGSAFlAwQBLjARBAx8Yr6Jo0A%2FtVodFOsCARCAO3qJzXQGkoZ0eONfeSTULa7oDojhHQ%2FOGUkWRvPUWHDhq7MovYU3hSulW03wVv0%2FQBI%2F5BpPoO91PF6BAgAAAAAMAAAQAAAAAAAAAAAAAAAAAEpeOhq25nCnutJ%2FEQX2wjn%2F%2F%2F%2F%2FAAAAAQAAAAAAAAAAAAAAAQAAADL9JEsDSKWTnhiEM0gI%2FJWijlnYeg47%2BXymUaE4jqYy3ILFsxennZz9m8lmxZwYTKoELa1mwXICrfPoTpc7BPP1%2BJc%3D&product=confluence
-- Demo video (YouTube, public): [INSERT]
-- Source repository: [INSERT if published]
+- Demo video (YouTube, public): https://youtu.be/Iiw7ZG6rSYI
+- Source repository: https://github.com/buahrasa01-hub/rulebridge
+
+## Additional-info answers (entered in the Devpost form, draft 1293963)
+
+**Why this track (Apps for Business Teams):** RuleBridge is built for the teams who keep their decisions in Confluence — operations and business teams whose decision records drive real work every day. The failure it catches, a page declaring itself decided or final while its body disagrees, is a business-process problem, so Apps for Business Teams is its natural home.
+
+**Experience building with Forge:** Building RuleBridge on Forge was fast where it mattered: UI Kit let us put the verdict exactly where the work happens (a byline item under the page title, a content action, and a space page) without hosting anything ourselves, and the resolver model kept all logic in one testable codebase — our rules engine is a pure module with a 44-case test suite that runs locally with npm test. Rovo actions were a pleasant surprise: exposing the same check/fix/scan functions as standard Forge actions made the agent integration almost free. What we struggled with: permission nuances on the Confluence content endpoints (granular versus classic scopes behave differently than the endpoint docs suggest, and an "Authentication Required" error gives very little to debug from), one bundler interop quirk with a CommonJS dependency that local tests do not catch, and the route-template restriction on interpolated paths (solved with assumeTrustedRoute). What we would improve: richer error details from product API calls inside Forge functions, and quicker access to production function logs during debugging — both would have shortened our hardest debugging session considerably.
