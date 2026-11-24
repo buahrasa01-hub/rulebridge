@@ -11,6 +11,11 @@ const ResolverClass = [resolverModule, resolverModule?.default, resolverModule?.
 import { checkPage } from '../lib/decisionRules.js';
 import * as confluence from '../lib/confluenceClient.js';
 import { applyFix, scanSpace } from '../lib/fixes.js';
+import {
+  getLinkedPages,
+  findGraphPairs,
+  mergeGraphPairs,
+} from '../lib/teamworkGraph.js';
 
 // ---------------------------------------------------------------------------
 // RuleBridge — backend resolvers
@@ -67,11 +72,44 @@ function pageIdFrom(req) {
 resolver.define('analyzePage', async (req) => {
   const pageId = pageIdFrom(req);
   if (!pageId) {
-    return { source: 'fixture', page: SAMPLE_PAGE, ...checkPage(SAMPLE_PAGE) };
+    return {
+      source: 'fixture',
+      page: SAMPLE_PAGE,
+      ...checkPage(SAMPLE_PAGE),
+      graph: { available: false, reason: 'fixture' },
+      graphPairs: [],
+    };
   }
   try {
     const page = await confluence.getPage(pageId);
-    return { source: 'live', page, ...checkPage(page) };
+    const check = checkPage(page);
+    // Teamwork Graph enrichment (read-only): the graph knows the
+    // pages THIS page actually links to, wherever they live — the
+    // Rule 6 pair rule then runs against real links, not just pages
+    // that happen to share a space scan. A graph failure never breaks
+    // the verdict: the page-local result stands and the graph is
+    // labelled unavailable (same honesty rule as the fixture fallback).
+    let merged = check;
+    let graph = { available: false, reason: 'graph-unavailable', linkedPageCount: 0 };
+    try {
+      const linked = await getLinkedPages({
+        cloudId: req.context && req.context.cloudId,
+        pageId: page.id,
+      });
+      if (linked.available) {
+        const pairs = findGraphPairs(page, linked.pages);
+        merged = mergeGraphPairs(check, pairs);
+        graph = { available: true, linkedPageCount: linked.pages.length };
+      } else {
+        graph = { available: false, reason: linked.reason, linkedPageCount: 0 };
+      }
+    } catch (graphError) {
+      console.warn(
+        `analyzePage: Teamwork Graph enrichment failed for ${pageId}: ${graphError.message}`,
+      );
+      graph = { available: false, reason: 'graph-error', linkedPageCount: 0 };
+    }
+    return { source: 'live', page, ...merged, graphPairs: merged.graphPairs || [], graph };
   } catch (error) {
     // No live site yet (or a transient API failure): fall back to the
     // fixture and label it, rather than rendering a broken panel.
@@ -80,6 +118,8 @@ resolver.define('analyzePage', async (req) => {
       source: 'fixture',
       page: { ...SAMPLE_PAGE, id: pageId },
       ...checkPage(SAMPLE_PAGE),
+      graph: { available: false, reason: 'fixture' },
+      graphPairs: [],
     };
   }
 });

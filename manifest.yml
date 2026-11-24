@@ -75,7 +75,9 @@ modules:
         2. Invoke the check-page-contradictions action with that id.
         3. Report the verdict plainly: name the declared state, and if
            there are findings, explain each in one sentence and name
-           the fix the checker offers.
+           the fix the checker offers. If the result includes
+           Teamwork Graph linked pages that contradict this page, name
+           the linked page and the position it states.
 
         ---
         Job 2: Scan a space
@@ -113,6 +115,38 @@ modules:
         - check-page-contradictions
         - fix-page-contradiction
         - scan-space-contradictions
+      skills:
+        - rulebridge-contradiction-checker
+  # BONUS — Best app with MCP (Codegeist 2026): the same three actions,
+  # exposed as tools on a Rovo MCP server. Any MCP-compatible client
+  # (Rovo Studio custom agents, or third-party clients via
+  # https://mcp.atlassian.com/forge/<appId>) can invoke them; the
+  # handlers in src/rovo.js are unchanged — the MCP server is a new
+  # doorway to the same tools, not a second implementation. One
+  # rovo:mcp module per app is the platform maximum.
+  rovo:mcp:
+    - key: rulebridge-mcp
+      name: RuleBridge MCP
+      tools:
+        - check-page-contradictions
+        - fix-page-contradiction
+        - scan-space-contradictions
+  # BONUS — open-source skill (rovo:skill): the same three tools,
+  # packaged with reusable instructions (skills/
+  # rulebridge-contradiction-checker/SKILL.md) so any Rovo agent can
+  # run a contradiction check the same careful way: check first,
+  # report the verdict, fix only what the checker offered and only
+  # after the user confirms — and never rewrite a page's own words.
+  # No new scopes: the skill reuses the actions' own.
+  rovo:skill:
+    - key: rulebridge-contradiction-checker
+      source:
+        dir: skills/rulebridge-contradiction-checker
+      dependencies:
+        tools:
+          - check-page-contradictions
+          - fix-page-contradiction
+          - scan-space-contradictions
   # The agent's tools. These are standard Forge `action` modules, so
   # other agents (including customer-built ones) can invoke them too.
   action:
@@ -194,6 +228,18 @@ permissions:
     # (the additive fix blocks) — granular Confluence scopes.
     - read:page:confluence
     - write:page:confluence
+    # Classic content scopes: on this install the v1 content-by-id
+    # endpoints (GET/PUT /rest/api/content/{id}) reject calls with
+    # "Authentication Required" under the granular page scopes alone,
+    # while search and label calls succeed. The classic content
+    # scopes are the documented grant for those v1 endpoints.
+    - read:confluence-content.all
+    - write:confluence-content
+    # Granular content scopes: the v1 content-by-id endpoints map to
+    # read:content/write:content in the granular scheme (the page
+    # scopes above cover page-typed operations, not these).
+    - read:content:confluence
+    - write:content:confluence
     # Content properties: the page-level due-date the owner rule
     # honours, and explicit linked-page records for Rule 6 pairing.
     - read:content.property:confluence
@@ -202,3 +248,10 @@ permissions:
     - write:label:confluence
     # CQL search powers the space scan's page discovery.
     - search:confluence
+    # Teamwork Graph (read-only, Preview): the per-page check runs
+    # the Rule 6 pair rule against the pages this page actually links
+    # to, via the graph (see src/lib/teamworkGraph.js). One scope for
+    # the object type the curated query touches and returns
+    # (ConfluencePage). All Teamwork Graph scopes are read-only;
+    # there is no write scope for the graph.
+    - read:graph:page:confluence

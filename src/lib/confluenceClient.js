@@ -372,16 +372,17 @@ export async function addLabel(pageId, label) {
  * is new-block + existing body, never a replacement.
  */
 export async function prependToPage(pageId, storageBlock) {
-  const raw = await request(
-    'GET',
-    `/rest/api/content/${encodeURIComponent(pageId)}?expand=body.storage,version`,
-  );
-  const currentBody = raw.body && raw.body.storage ? raw.body.storage.value : '';
-  const nextVersion = (raw.version ? raw.version.number : 0) + 1;
+  // Fetch through getPage, not a raw content GET: some installs
+  // reject the direct GET ("Authentication Required") while the
+  // search-backed fallback in getPage succeeds — and the normalised
+  // page carries everything the update needs (title, version, body).
+  const page = await getPage(pageId);
+  const currentBody = page._storage || '';
+  const nextVersion = (page.version || 0) + 1;
   const updated = await request('PUT', `/rest/api/content/${encodeURIComponent(pageId)}`, {
     id: String(pageId),
     type: 'page',
-    title: raw.title,
+    title: page.title,
     version: { number: nextVersion, message: 'RuleBridge: applied a human-confirmed fix' },
     body: {
       storage: { value: `${storageBlock}${currentBody}`, representation: 'storage' },

@@ -1,6 +1,11 @@
 import { checkPage } from './lib/decisionRules.js';
 import * as confluence from './lib/confluenceClient.js';
 import { applyFix, scanSpace } from './lib/fixes.js';
+import {
+  getLinkedPages,
+  findGraphPairs,
+  mergeGraphPairs,
+} from './lib/teamworkGraph.js';
 
 // ---------------------------------------------------------------------------
 // RuleBridge — Rovo action handlers
@@ -40,28 +45,55 @@ function resolvePageId(payload) {
 
 /**
  * action: check-page-contradictions (GET, read-only)
- * Input: pageId. Returns the engine verdict for one page.
+ * Input: pageId. Returns the engine verdict for one page, enriched
+ * with Teamwork Graph linked pages: when a page this page links to
+ * states the opposite position on the same subject, the Rule 6 pair
+ * finding is included (with the linked page named). A graph failure
+ * never fails the action: the page-local verdict is returned with
+ * graph.available false.
  */
-export async function checkPageContradictions(payload) {
+export async function checkPageContradictions(payload, context) {
   const pageId = resolvePageId(payload);
   if (!pageId) {
     return { ok: false, error: 'No page id was provided and none was found in the context.' };
   }
   const page = await confluence.getPage(pageId);
   const result = checkPage(page);
+  let merged = result;
+  let graph = { available: false, reason: 'graph-unavailable', linkedPageCount: 0 };
+  try {
+    const linked = await getLinkedPages({
+      cloudId: context && context.cloudId,
+      pageId: page.id,
+    });
+    if (linked.available) {
+      const pairs = findGraphPairs(page, linked.pages);
+      merged = mergeGraphPairs(result, pairs);
+      graph = { available: true, linkedPageCount: linked.pages.length };
+    } else {
+      graph = { available: false, reason: linked.reason, linkedPageCount: 0 };
+    }
+  } catch (error) {
+    console.warn(
+      `checkPageContradictions: Teamwork Graph enrichment failed for ${pageId}: ${error.message}`,
+    );
+    graph = { available: false, reason: 'graph-error', linkedPageCount: 0 };
+  }
   return {
     ok: true,
     pageId: page.id,
     title: page.title,
     declaredState: page.statusSignal,
-    consistent: result.consistent,
-    verdict: result.verdict,
-    findings: result.findings.map((f) => ({
+    consistent: merged.consistent,
+    verdict: merged.verdict,
+    findings: merged.findings.map((f) => ({
       rule: f.rule,
       claim: f.claim,
       message: f.message,
       suggestedFix: f.fix ? f.fix.label : null,
     })),
+    graphPairs: merged.graphPairs || [],
+    graph,
   };
 }
 

@@ -103,3 +103,6 @@ Dev panel loaded after the ResolverClass fix but fell back to the demo fixture: 
 
 ## 2026-11-10 (evening) — Bug 3: byline live-read "Authentication Required"
 Production logs (Bayu, forge logs) showed: `analyzePage: live read failed for 753680: Authentication Required` — the page id arrived correctly and the resolver ran, but the direct content GET (`/rest/api/content/{id}`) was rejected in the installed environment, while CQL search by the same user worked (the space scan read live pages). Fix: `getPage` now falls back to a CQL search by id (same expanded shape) when the direct GET throws, rethrowing the original error when search finds nothing. No manifest/scope changes. Tests 44/44; esbuild bundle smoke OK for index + rovo entries.
+
+## 2026-11-10 (night) — Bug 4: decision-log fix died in prependToPage's own raw GET
+The getPage fallback fixed reads, but `prependToPage` still opened with its own direct `GET /rest/api/content/{id}` — the endpoint this install rejects with "Authentication Required" — so the decision-log fix failed while the label fix (POST .../label, no raw GET) worked. Fix: `prependToPage` now fetches through `getPage` (normalised page carries title, version, and `_storage`). Tests 44/44; bundle smoke OK. The PUT itself is exercised for the first time after this deploy — verified live on a scratch page before any re-recording.
