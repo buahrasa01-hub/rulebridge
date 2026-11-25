@@ -100,6 +100,13 @@ resolver.define('analyzePage', async (req) => {
         const pairs = findGraphPairs(page, linked.pages);
         merged = mergeGraphPairs(check, pairs);
         graph = { available: true, linkedPageCount: linked.pages.length };
+        // One success line so `forge logs` can confirm the graph
+        // call ran (and how many pages it returned) without digging
+        // into the payload.
+        console.log(
+          `analyzePage: Teamwork Graph returned ${linked.pages.length} ` +
+            `linked page(s) for ${pageId}.`,
+        );
       } else {
         graph = { available: false, reason: linked.reason, linkedPageCount: 0 };
       }

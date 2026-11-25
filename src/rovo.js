@@ -106,10 +106,13 @@ export async function checkPageContradictions(payload, context) {
  * the requested kind from the *actual* findings — it never applies a
  * fix the engine did not offer for the page's current state, so a
  * stale or hallucinated request fails safely instead of writing.
+ * The re-run includes the Teamwork Graph enrichment (best-effort, so
+ * a graph-only fix the check offered — e.g. flag-page from a
+ * contradicting linked decision — stays applicable here too).
  * ('draft-summary' is always available: it summarises whatever the
  * current findings are.)
  */
-export async function fixPageContradiction(payload) {
+export async function fixPageContradiction(payload, context) {
   const pageId = resolvePageId(payload);
   const fixKind = payload && payload.fixKind;
   if (!pageId || !fixKind) {
@@ -120,13 +123,27 @@ export async function fixPageContradiction(payload) {
     const result = await applyFix(confluence, page, { kind: 'draft-summary' });
     return { ok: result.applied, pageId, ...result };
   }
-  const check = checkPage(page);
-  const finding = check.findings.find((f) => f.fix && f.fix.kind === fixKind);
+  let merged = checkPage(page);
+  try {
+    const linked = await getLinkedPages({
+      cloudId: context && context.cloudId,
+      pageId: page.id,
+    });
+    if (linked.available) {
+      const pairs = findGraphPairs(page, linked.pages);
+      merged = mergeGraphPairs(merged, pairs);
+    }
+  } catch (error) {
+    console.warn(
+      `fixPageContradiction: Teamwork Graph enrichment failed for ${pageId}: ${error.message}`,
+    );
+  }
+  const finding = merged.findings.find((f) => f.fix && f.fix.kind === fixKind);
   if (!finding) {
     return {
       ok: false,
       pageId,
-      error: `No "${fixKind}" fix is currently offered for "${page.title}" (consistent: ${check.consistent}).`,
+      error: `No "${fixKind}" fix is currently offered for "${page.title}" (consistent: ${merged.consistent}).`,
     };
   }
   const applied = await applyFix(confluence, page, finding.fix, { finding });

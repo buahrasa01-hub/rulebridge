@@ -91,7 +91,7 @@ const App = () => {
     );
   }
 
-  const { page, consistent, verdict, findings, source } = result;
+  const { page, consistent, verdict, findings, source, graph, graphPairs } = result;
 
   return (
     <Box padding="space.200">
@@ -151,6 +151,30 @@ const App = () => {
               </Button>
             </Inline>
           </>
+        )}
+        {graph && graph.available ? (
+          <Stack space="space.100">
+            <Heading as="h4">Teamwork Graph evidence</Heading>
+            <Text>
+              Checked {graph.linkedPageCount || 0} linked page(s) from the Teamwork Graph.
+            </Text>
+            {(graphPairs || []).map((pair) => (
+              <Stack key={pair.linkedPageId || pair.linkedTitle} space="space.100">
+                <Text>
+                  Contradicts “{pair.linkedTitle}”: {pair.verdict}
+                </Text>
+              </Stack>
+            ))}
+          </Stack>
+        ) : (
+          graph && (
+            <SectionMessage title="Teamwork Graph unavailable" appearance="information">
+              <Text>
+                Teamwork Graph unavailable — verdict from the page check alone.
+                {graph.reason ? ` (${graph.reason})` : ''}
+              </Text>
+            </SectionMessage>
+          )
         )}
       </Stack>
     </Box>

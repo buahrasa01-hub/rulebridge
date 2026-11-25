@@ -9,13 +9,17 @@
 import { test, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as conf from '../src/lib/confluenceClient.js';
+import * as graph from '../src/lib/teamworkGraph.js';
 import {
   checkPageContradictions,
   fixPageContradiction,
   scanSpaceContradictions,
 } from '../src/rovo.js';
 
-afterEach(() => conf.setTransportForTests(null));
+afterEach(() => {
+  conf.setTransportForTests(null);
+  graph.setTransportForTests(null);
+});
 
 const DECIDED_PAGE = {
   id: '1001',
@@ -169,6 +173,82 @@ test('MCP fix-page-contradiction refuses a fix the check does not offer', async 
   const result = await fixPageContradiction({ pageId: '1002', fixKind: 'insert-decision-log' });
   assert.equal(result.ok, false);
   assert.match(result.error, /No "insert-decision-log" fix is currently offered/);
+});
+
+// Locally clean page that states a position ("Decision: use
+// Postgres") the graph-linked page contradicts ("Rejected:
+// Postgres") — the only flag-page fix on offer comes from the graph
+// (Rule 6 over real links), never from the page-local rules.
+const GRAPH_ONLY_PAGE = {
+  id: '100',
+  title: 'Storage backend — DECIDED',
+  status: 'current',
+  space: { key: 'TEAM' },
+  version: { number: 2 },
+  metadata: { labels: { results: [{ name: 'decision' }] } },
+  body: {
+    storage: {
+      value:
+        '<p>Decision: use Postgres</p>' +
+        '<p>The team picked Postgres for the new store.</p>',
+      representation: 'storage',
+    },
+  },
+};
+
+const GRAPH_DATA = {
+  confluencePageLinkedConfluencePages: {
+    edges: [
+      {
+        node: {
+          id: 'ari:cloud:confluence:cloud-1:page/200',
+          pageId: '200',
+          title: 'Storage backend — DECIDED',
+          space: { key: 'TEAM' },
+          content: {
+            storage: {
+              value:
+                '<p>Decision log, updated after the migration review.</p>' +
+                '<p>Rejected: Postgres</p>' +
+                '<p>We will not use Postgres for the new store.</p>',
+            },
+          },
+        },
+      },
+    ],
+    pageInfo: { hasNextPage: false, endCursor: null },
+  },
+};
+
+test('MCP fix-page-contradiction applies a graph-only flag-page fix', async () => {
+  const calls = wire({
+    'GET /rest/api/content/100?expand=': { status: 200, json: GRAPH_ONLY_PAGE },
+    ...noDueDate('100'),
+    'POST /rest/api/content/100/label': { status: 200, json: {} },
+  });
+  graph.setTransportForTests(async () => ({ data: GRAPH_DATA }));
+  const result = await fixPageContradiction(
+    { pageId: '100', fixKind: 'flag-page' },
+    { cloudId: 'cloud-1' },
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.applied, true);
+  assert.equal(result.rule, 'contradictory-linked-decisions');
+  assert.match(result.detail, /needs-review/);
+  const post = calls.find((c) => c.method === 'POST');
+  assert.deepEqual(post.body, [{ prefix: 'global', name: 'needs-review' }]);
+});
+
+test('MCP fix-page-contradiction refuses a graph-only fix when the graph is unreachable', async () => {
+  wire({
+    'GET /rest/api/content/100?expand=': { status: 200, json: GRAPH_ONLY_PAGE },
+    ...noDueDate('100'),
+  });
+  // No cloudId in context: the graph returns unavailable without a
+  // request, so the page-local check (clean) offers no flag-page fix.
+  const result = await fixPageContradiction({ pageId: '100', fixKind: 'flag-page' });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /No "flag-page" fix is currently offered/);
 });
 
 test('MCP scan-space-contradictions flags only the contradicting pages', async () => {
